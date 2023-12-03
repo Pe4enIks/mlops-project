@@ -19,7 +19,6 @@ repos:
     rev: 1.6.1
     hooks:
      - id: poetry-check
-     - id: poetry-lock
 
   - repo: https://github.com/nbQA-dev/nbQA
     rev: 1.7.1
