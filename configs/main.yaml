@@ -19,9 +19,14 @@ train:
     test:
       path: cats_dogs/test_labeled
       batch_size: 32
-  transform:
-    h: 96
-    w: 96
-    mean: [0.485, 0.456, 0.406]
-    std: [0.229, 0.224, 0.225]
   save_path: ckpt
+
+infer:
+  ckpt: ckpt/resnet18.onnx
+  img: cats_dogs/test_labeled/cat/cat.5.jpg
+
+transform:
+  h: 96
+  w: 96
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]

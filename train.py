@@ -132,18 +132,18 @@ def main(cfg: DictConfig):
     seed = cfg_dict['seed']
     device = cfg_dict['device']
     num_workers = cfg_dict['num_workers']
-    epochs = cfg['train']['epochs']
+    epochs = cfg_dict['train']['epochs']
     train_data_path = cfg_dict['train']['dataset']['train']['path']
     val_data_path = cfg_dict['train']['dataset']['val']['path']
     test_data_path = cfg_dict['train']['dataset']['test']['path']
     train_batch_size = cfg_dict['train']['dataset']['train']['batch_size']
     val_batch_size = cfg_dict['train']['dataset']['val']['batch_size']
     test_batch_size = cfg_dict['train']['dataset']['test']['batch_size']
-    h, w = cfg['train']['transform']['h'], cfg['train']['transform']['w']
-    mean = cfg['train']['transform']['mean']
-    std = cfg['train']['transform']['std']
-    optimizer_name = cfg['optimizer']['name']
-    save_path = cfg['train']['save_path']
+    h, w = cfg_dict['transform']['h'], cfg_dict['transform']['w']
+    mean = cfg_dict['transform']['mean']
+    std = cfg_dict['transform']['std']
+    optimizer_name = cfg_dict['optimizer']['name']
+    save_path = cfg_dict['train']['save_path']
 
     save_path = os.path.join(expected_workdir, save_path)
     os.makedirs(save_path, exist_ok=True)
@@ -217,7 +217,7 @@ def main(cfg: DictConfig):
 
     optimizer = getattr(optim, optimizer_name)(
         model.parameters(),
-        **cfg['optimizer']['params']
+        **cfg_dict['optimizer']['params']
     )
 
     acc = MulticlassAccuracy(average='weighted', num_classes=2).to(device)
