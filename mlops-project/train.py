@@ -1,16 +1,16 @@
 import logging
 import os
+from pathlib import Path
 
 import hydra
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchmetrics.classification import (MulticlassAccuracy, MulticlassAUROC,
                                          MulticlassPrecision, MulticlassRecall)
 from torchvision import datasets, models, transforms
-
 from utils import seed_everything
 
 logger = logging.getLogger(__name__)
@@ -123,101 +123,92 @@ def test(
     logger.info(f'{test_metric_str[1:]}')
 
 
-@hydra.main(config_path='configs', config_name='main', version_base='1.2')
+@hydra.main(
+    config_path=str(Path(__file__).parent / 'configs'),
+    config_name='main',
+    version_base='1.2'
+)
 def main(cfg: DictConfig):
-    cfg_dict = OmegaConf.to_container(cfg)
-    expected_workdir = os.path.dirname(__file__)
+    expected_workdir = Path(__file__).parent
 
-    model_name = cfg_dict['model']
-    seed = cfg_dict['seed']
-    device = cfg_dict['device']
-    num_workers = cfg_dict['num_workers']
-    epochs = cfg_dict['train']['epochs']
-    train_data_path = cfg_dict['train']['dataset']['train']['path']
-    val_data_path = cfg_dict['train']['dataset']['val']['path']
-    test_data_path = cfg_dict['train']['dataset']['test']['path']
-    train_batch_size = cfg_dict['train']['dataset']['train']['batch_size']
-    val_batch_size = cfg_dict['train']['dataset']['val']['batch_size']
-    test_batch_size = cfg_dict['train']['dataset']['test']['batch_size']
-    h, w = cfg_dict['transform']['h'], cfg_dict['transform']['w']
-    mean = cfg_dict['transform']['mean']
-    std = cfg_dict['transform']['std']
-    optimizer_name = cfg_dict['optimizer']['name']
-    save_path = cfg_dict['train']['save_path']
+    save_path = expected_workdir / cfg.train.save_path
+    os.makedirs(str(save_path), exist_ok=True)
+    save_path = save_path / f'{cfg.model}.onnx'
 
-    save_path = os.path.join(expected_workdir, save_path)
-    os.makedirs(save_path, exist_ok=True)
-    save_path = os.path.join(save_path, f'{model_name}.onnx')
-
-    seed_everything(seed)
-    device = torch.device(device)
+    seed_everything(cfg.seed)
+    device = torch.device(cfg.device)
 
     train_transform = transforms.Compose([
-        transforms.Resize((int(1.5*h), int(1.5*w))),
-        transforms.RandomCrop((h, w)),
+        transforms.Resize(
+            (
+                int(1.5 * cfg.transform.h),
+                int(1.5 * cfg.transform.w)
+            )
+        ),
+        transforms.RandomCrop((cfg.transform.h, cfg.transform.w)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        transforms.Normalize(cfg.transform.mean, cfg.transform.std)
     ])
 
     test_transform = transforms.Compose([
-        transforms.Resize((h, w)),
+        transforms.Resize((cfg.transform.h, cfg.transform.w)),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        transforms.Normalize(cfg.transform.mean, cfg.transform.std)
     ])
 
     train_dataset = datasets.ImageFolder(
-        os.path.join(expected_workdir, train_data_path),
+        expected_workdir / cfg.train.dataset.train.path,
         transform=train_transform
     )
 
     val_dataset = datasets.ImageFolder(
-        os.path.join(expected_workdir, val_data_path),
+        expected_workdir / cfg.train.dataset.val.path,
         transform=train_transform
     )
 
     test_dataset = datasets.ImageFolder(
-        os.path.join(expected_workdir, test_data_path),
+        expected_workdir / cfg.train.dataset.test.path,
         transform=test_transform
     )
 
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=train_batch_size,
+        batch_size=cfg.train.dataset.train.batch_size,
         shuffle=True,
-        num_workers=num_workers
+        num_workers=cfg.num_workers
     )
 
     # если не делать shuffle, то будут батчи из 0 или 1 = неверная метрика
     val_dataloader = DataLoader(
         val_dataset,
-        batch_size=val_batch_size,
+        batch_size=cfg.train.dataset.val.batch_size,
         shuffle=True,
-        num_workers=num_workers
+        num_workers=cfg.num_workers
     )
 
     # если не делать shuffle, то будут батчи из 0 или 1 = неверная метрика
     test_dataloader = DataLoader(
         test_dataset,
-        batch_size=test_batch_size,
+        batch_size=cfg.train.dataset.test.batch_size,
         shuffle=True,
-        num_workers=num_workers
+        num_workers=cfg.num_workers
     )
 
-    if 'resnet' in model_name:
-        model = getattr(models, model_name)(weights='DEFAULT')
+    if 'resnet' in cfg.model:
+        model = getattr(models, cfg.model)(weights='DEFAULT')
         model.fc = nn.Linear(model.fc.in_features, 2)
         model = model.to(device)
     else:
-        raise ValueError(f'{model_name} is not available')
+        raise ValueError(f'{cfg.model} is not available')
 
     loss_fn = nn.CrossEntropyLoss()
     loss_fn = loss_fn.to(device)
 
-    optimizer = getattr(optim, optimizer_name)(
+    optimizer = getattr(optim, cfg.optimizer.name)(
         model.parameters(),
-        **cfg_dict['optimizer']['params']
+        **cfg.optimizer.params
     )
 
     acc = MulticlassAccuracy(average='weighted', num_classes=2).to(device)
@@ -239,7 +230,7 @@ def main(cfg: DictConfig):
         train_dataloader,
         val_dataloader,
         device,
-        epochs,
+        cfg.train.epochs,
         metrics,
         logger
     )

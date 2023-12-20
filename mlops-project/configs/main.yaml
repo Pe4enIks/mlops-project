@@ -11,19 +11,19 @@ train:
   epochs: 10
   dataset:
     train:
-      path: cats_dogs/train_11k
+      path: data/cats_dogs/train_11k
       batch_size: 32
     val:
-      path: cats_dogs/val
+      path: data/cats_dogs/val
       batch_size: 32
     test:
-      path: cats_dogs/test_labeled
+      path: data/cats_dogs/test_labeled
       batch_size: 32
-  save_path: ckpt
+  save_path: data/ckpt
 
 infer:
-  ckpt: ckpt/resnet18.onnx
-  img: cats_dogs/test_labeled/cat/cat.5.jpg
+  ckpt: data/ckpt/resnet18.onnx
+  img: data/cats_dogs/test_labeled/cat/cat.5.jpg
 
 transform:
   h: 96

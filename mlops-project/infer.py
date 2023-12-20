@@ -1,46 +1,38 @@
 import logging
-import os
+from pathlib import Path
 
 import hydra
 import numpy as np
 import onnxruntime
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from PIL import Image
 from torchvision import transforms
-
 from utils import seed_everything
 
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(config_path='configs', config_name='main', version_base='1.2')
+@hydra.main(
+    config_path=str(Path(__file__).parent / 'configs'),
+    config_name='main',
+    version_base='1.2'
+)
 def main(cfg: DictConfig):
-    cfg_dict = OmegaConf.to_container(cfg)
-    expected_workdir = os.path.dirname(__file__)
-
-    seed = cfg_dict['seed']
-
-    h, w = cfg_dict['transform']['h'], cfg_dict['transform']['w']
-    mean = cfg_dict['transform']['mean']
-    std = cfg_dict['transform']['std']
-
-    ckpt_path = cfg_dict['infer']['ckpt']
-    img_path = cfg_dict['infer']['img']
-
-    seed_everything(seed)
+    expected_workdir = Path(__file__).parent
+    seed_everything(cfg.seed)
 
     transform = transforms.Compose([
-        transforms.Resize((h, w)),
+        transforms.Resize((cfg.transform.h, cfg.transform.w)),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        transforms.Normalize(cfg.transform.mean, cfg.transform.std)
     ])
 
     ort_session = onnxruntime.InferenceSession(
-        os.path.join(expected_workdir, ckpt_path),
+        expected_workdir / cfg.infer.ckpt,
         providers=['CPUExecutionProvider']
     )
 
-    img = Image.open(os.path.join(expected_workdir, img_path)).convert('RGB')
+    img = Image.open(str(expected_workdir / cfg.infer.img)).convert('RGB')
     img = transform(img)
     img = img.unsqueeze(0).numpy().astype(np.float32)
 
@@ -55,8 +47,8 @@ def main(cfg: DictConfig):
     pred_class = class_mapping[np.argmax(outputs[0], axis=1)[0]]
 
     logger.info(
-        f'ckpt: {ckpt_path} '
-        f'img: {img_path} '
+        f'ckpt: {cfg.infer.ckpt} '
+        f'img: {cfg.infer.img} '
         f'predicted class: {pred_class}'
     )
 
