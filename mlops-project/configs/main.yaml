@@ -4,11 +4,14 @@ defaults:
 
 model: resnet18
 seed: 42
-device: cuda:0
 num_workers: 4
+precision: 32
+mlflow_server: http://128.0.1.1:8080
 
 train:
-  epochs: 10
+  accelerator: gpu
+  devices: [0]
+  steps: 2000
   dataset:
     train:
       path: data/cats_dogs/train_11k
@@ -19,10 +22,21 @@ train:
     test:
       path: data/cats_dogs/test_labeled
       batch_size: 32
-  save_path: data/ckpt
+  onnx_save_path: data/onnx
+  experiment_name: resnet18
+  loggers:
+    log_path: data/logs
+    log_every_n_steps: 250
+  callbacks:
+    model_ckpt:
+      ckpt_path: data/ckpt
+      save_top_k: 5
+      every_n_train_steps: 500
+    model_summary:
+      max_depth: 1
 
 infer:
-  ckpt: data/ckpt/resnet18.onnx
+  ckpt: data/onnx/resnet18.onnx
   img: data/cats_dogs/test_labeled/cat/cat.5.jpg
 
 transform:

@@ -1,264 +1,123 @@
-import logging
 import os
+import subprocess
 from pathlib import Path
 
 import hydra
-import numpy as np
+import pytorch_lightning as pl
 import torch
-from omegaconf import DictConfig
-from torch import nn, optim
-from torch.utils.data import DataLoader
-from torchmetrics.classification import (MulticlassAccuracy, MulticlassAUROC,
-                                         MulticlassPrecision, MulticlassRecall)
-from torchvision import datasets, models, transforms
-from utils import seed_everything
-
-logger = logging.getLogger(__name__)
+from dataset import CatsDogsDataModule
+from model import ClassificationModel
+from omegaconf import DictConfig, open_dict
+from torchvision import transforms
 
 
-def train(
-        model,
-        optimizer,
-        loss_fn,
-        train_dataloader,
-        val_dataloader,
-        device,
-        epochs,
-        metrics,
-        logger
-):
-    metric_names = metrics.keys()
-    for epoch in range(epochs):
-        train_loss, val_loss = [], []
-        train_metrics = val_metrics = {mn: [] for mn in metric_names}
-
-        model.train()
-        for batch in train_dataloader:
-            img, label = batch
-
-            img = img.to(device)
-            label = label.to(device)
-
-            logits = model.forward(img)
-            loss = loss_fn(logits, label)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            train_loss += [loss.item()]
-
-            for metric_name in metric_names:
-                train_metrics[metric_name] += [
-                    metrics[metric_name](logits, label).item()
-                ]
-
-        model.eval()
-        with torch.no_grad():
-            for batch in val_dataloader:
-                img, label = batch
-
-                img = img.to(device)
-                label = label.to(device)
-
-                logits = model.forward(img)
-                loss = loss_fn(logits, label)
-
-                val_loss += [loss.item()]
-
-                for metric_name in metric_names:
-                    val_metrics[metric_name] += [
-                        metrics[metric_name](logits, label).item()
-                    ]
-
-        train_metric_str, val_metric_str = '', ''
-        for metric_name in metric_names:
-            train_metric = np.mean(train_metrics[metric_name])
-            train_metric_str += f' train {metric_name}: {train_metric:.3f}'
-            val_metric = np.mean(val_metrics[metric_name])
-            val_metric_str += f' val {metric_name}: {val_metric:.3f}'
-
-        train_loss_epoch = np.mean(train_loss)
-        val_loss_epoch = np.mean(val_loss)
-
-        logger.info(
-            f'EPOCH: {epoch+1} '
-            f'train loss: {train_loss_epoch:.3f} '
-            f'{train_metric_str[1:]} '
-            f'val loss: {val_loss_epoch:.3f} '
-            f'{val_metric_str[1:]} '
-        )
+def get_git_revision_hash() -> str:
+    encoded_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])
+    decoded_hash = encoded_hash.decode("ascii").strip()
+    return decoded_hash
 
 
-def test(
-        model,
-        dataloader,
-        device,
-        metrics,
-        logger
-):
-    metric_names = metrics.keys()
-    test_metrics = {mn: [] for mn in metric_names}
+def configure_transforms(
+    cfg: DictConfig,
+) -> tuple[transforms.Compose, transforms.Compose]:
+    train_transform = transforms.Compose(
+        [
+            transforms.Resize((int(1.5 * cfg.transform.h), int(1.5 * cfg.transform.w))),
+            transforms.RandomCrop((cfg.transform.h, cfg.transform.w)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(25),
+            transforms.ToTensor(),
+            transforms.Normalize(cfg.transform.mean, cfg.transform.std),
+        ]
+    )
 
-    model.eval()
-    with torch.no_grad():
-        for batch in dataloader:
-            img, label = batch
+    test_transform = transforms.Compose(
+        [
+            transforms.Resize((cfg.transform.h, cfg.transform.w)),
+            transforms.ToTensor(),
+            transforms.Normalize(cfg.transform.mean, cfg.transform.std),
+        ]
+    )
 
-            img = img.to(device)
-            label = label.to(device)
-
-            logits = model.forward(img)
-
-            for metric_name in metric_names:
-                test_metrics[metric_name] += [
-                    metrics[metric_name](logits, label).item()
-                ]
-
-    test_metric_str = ''
-    for metric_name in metric_names:
-        test_metric = np.mean(test_metrics[metric_name])
-        test_metric_str += f' {metric_name}: {test_metric:.3f}'
-
-    logger.info(f'{test_metric_str[1:]}')
+    return train_transform, test_transform
 
 
 @hydra.main(
-    config_path=str(Path(__file__).parent / 'configs'),
-    config_name='main',
-    version_base='1.2'
+    config_path=str(Path(__file__).parent / "configs"),
+    config_name="main",
+    version_base="1.2",
 )
 def main(cfg: DictConfig):
     expected_workdir = Path(__file__).parent
+    os.system("dvc pull")
 
-    save_path = expected_workdir / cfg.train.save_path
-    os.makedirs(str(save_path), exist_ok=True)
-    save_path = save_path / f'{cfg.model}.onnx'
+    onnx_save_path = expected_workdir / cfg.train.onnx_save_path
+    os.makedirs(str(onnx_save_path), exist_ok=True)
+    onnx_save_path = onnx_save_path / f"{cfg.train.experiment_name}.onnx"
 
-    seed_everything(cfg.seed)
-    device = torch.device(cfg.device)
+    pl.seed_everything(cfg.seed)
+    torch.set_float32_matmul_precision("medium")
 
-    train_transform = transforms.Compose([
-        transforms.Resize(
-            (
-                int(1.5 * cfg.transform.h),
-                int(1.5 * cfg.transform.w)
-            )
+    train_transform, test_transform = configure_transforms(cfg)
+
+    dm = CatsDogsDataModule(
+        train_data_path=expected_workdir / cfg.train.dataset.train.path,
+        val_data_path=expected_workdir / cfg.train.dataset.val.path,
+        test_data_path=expected_workdir / cfg.train.dataset.test.path,
+        train_transform=train_transform,
+        test_transform=test_transform,
+        train_batch_size=cfg.train.dataset.train.batch_size,
+        val_batch_size=cfg.train.dataset.val.batch_size,
+        test_batch_size=cfg.train.dataset.test.batch_size,
+        num_workers=cfg.num_workers,
+    )
+
+    model = ClassificationModel(cfg)
+
+    logger = pl.loggers.MLFlowLogger(
+        experiment_name="cats_dogs",
+        run_name=cfg.train.experiment_name,
+        tracking_uri=cfg.mlflow_server,
+    )
+
+    with open_dict(cfg):
+        cfg.commit_hash = get_git_revision_hash()
+    logger.log_hyperparams(cfg)
+
+    every_n_train_steps = cfg.train.callbacks.model_ckpt.every_n_train_steps
+    callbacks = [
+        pl.callbacks.LearningRateMonitor(logging_interval="step"),
+        pl.callbacks.RichModelSummary(
+            max_depth=cfg.train.callbacks.model_summary.max_depth
         ),
-        transforms.RandomCrop((cfg.transform.h, cfg.transform.w)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.ToTensor(),
-        transforms.Normalize(cfg.transform.mean, cfg.transform.std)
-    ])
+        pl.callbacks.ModelCheckpoint(
+            dirpath=cfg.train.callbacks.model_ckpt.ckpt_path,
+            filename=cfg.train.experiment_name,
+            monitor="val_loss",
+            save_top_k=cfg.train.callbacks.model_ckpt.save_top_k,
+            every_n_train_steps=every_n_train_steps,
+        ),
+    ]
 
-    test_transform = transforms.Compose([
-        transforms.Resize((cfg.transform.h, cfg.transform.w)),
-        transforms.ToTensor(),
-        transforms.Normalize(cfg.transform.mean, cfg.transform.std)
-    ])
-
-    train_dataset = datasets.ImageFolder(
-        expected_workdir / cfg.train.dataset.train.path,
-        transform=train_transform
+    trainer = pl.Trainer(
+        accelerator=cfg.train.accelerator,
+        devices=cfg.train.devices,
+        precision=cfg.precision,
+        max_steps=cfg.train.steps,
+        log_every_n_steps=cfg.train.loggers.log_every_n_steps,
+        enable_checkpointing=True,
+        enable_model_summary=True,
+        enable_progress_bar=True,
+        logger=logger,
+        callbacks=callbacks,
     )
 
-    val_dataset = datasets.ImageFolder(
-        expected_workdir / cfg.train.dataset.val.path,
-        transform=train_transform
-    )
+    trainer.fit(model=model, datamodule=dm)
+    trainer.test(model=model, datamodule=dm)
 
-    test_dataset = datasets.ImageFolder(
-        expected_workdir / cfg.train.dataset.test.path,
-        transform=test_transform
-    )
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=cfg.train.dataset.train.batch_size,
-        shuffle=True,
-        num_workers=cfg.num_workers
-    )
-
-    # если не делать shuffle, то будут батчи из 0 или 1 = неверная метрика
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=cfg.train.dataset.val.batch_size,
-        shuffle=True,
-        num_workers=cfg.num_workers
-    )
-
-    # если не делать shuffle, то будут батчи из 0 или 1 = неверная метрика
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size=cfg.train.dataset.test.batch_size,
-        shuffle=True,
-        num_workers=cfg.num_workers
-    )
-
-    if 'resnet' in cfg.model:
-        model = getattr(models, cfg.model)(weights='DEFAULT')
-        model.fc = nn.Linear(model.fc.in_features, 2)
-        model = model.to(device)
-    else:
-        raise ValueError(f'{cfg.model} is not available')
-
-    loss_fn = nn.CrossEntropyLoss()
-    loss_fn = loss_fn.to(device)
-
-    optimizer = getattr(optim, cfg.optimizer.name)(
-        model.parameters(),
-        **cfg.optimizer.params
-    )
-
-    acc = MulticlassAccuracy(average='weighted', num_classes=2).to(device)
-    prc = MulticlassPrecision(average='weighted', num_classes=2).to(device)
-    rec = MulticlassRecall(average='weighted', num_classes=2).to(device)
-    auroc = MulticlassAUROC(average='weighted', num_classes=2).to(device)
-
-    metrics = {
-        'accuracy': acc,
-        'precision': prc,
-        'recall': rec,
-        'roc-auc': auroc
-    }
-
-    train(
-        model,
-        optimizer,
-        loss_fn,
-        train_dataloader,
-        val_dataloader,
-        device,
-        cfg.train.epochs,
-        metrics,
-        logger
-    )
-
-    test(
-        model,
-        test_dataloader,
-        device,
-        metrics,
-        logger
-    )
-
-    dummy_input = torch.rand((1, 3, 96, 96), dtype=torch.float32).to(device)
-    torch.onnx.export(
-        model,
-        dummy_input,
-        save_path,
-        export_params=True,
-        opset_version=17,
-        do_constant_folding=True,
-        input_names=['image'],
-        output_names=['label'],
-        dynamic_axes={
-            'image': {0: 'batch_size'},
-            'label': {0: 'batch_size'}
-        }
-    )
+    model.to_onnx(onnx_save_path, export_params=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

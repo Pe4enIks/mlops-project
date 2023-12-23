@@ -1,0 +1,6 @@
+outs:
+- md5: 45a84d6252ef4e601d6a1301681bde61.dir
+  size: 129829414
+  nfiles: 2
+  hash: md5
+  path: onnx
