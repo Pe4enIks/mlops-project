@@ -39,7 +39,7 @@ repos:
         args: [--max-line-length=88, --extend-ignore=E203]
 
   - repo: https://github.com/psf/black
-    rev: 24.1a1
+    rev: 23.12.1
     hooks:
       - id: black
 
