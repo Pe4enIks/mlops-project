@@ -1,0 +1,9 @@
+defaults:
+  - transform: resize_norm
+  - _self_
+
+seed: 42
+num_workers: 4
+
+ckpt: data/onnx/resnet18.onnx
+img: data/cats_dogs/test_labeled/cat/cat.5.jpg

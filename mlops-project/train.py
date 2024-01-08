@@ -45,16 +45,16 @@ def configure_transforms(
 
 @hydra.main(
     config_path=str(Path(__file__).parent / "configs"),
-    config_name="main",
+    config_name="train",
     version_base="1.2",
 )
 def main(cfg: DictConfig):
     expected_workdir = Path(__file__).parent
     os.system("dvc pull")
 
-    onnx_save_path = expected_workdir / cfg.train.onnx_save_path
+    onnx_save_path = expected_workdir / cfg.onnx_save_path
     os.makedirs(str(onnx_save_path), exist_ok=True)
-    onnx_save_path = onnx_save_path / f"{cfg.train.experiment_name}.onnx"
+    onnx_save_path = onnx_save_path / f"{cfg.experiment_name}.onnx"
 
     pl.seed_everything(cfg.seed)
     torch.set_float32_matmul_precision("medium")
@@ -62,14 +62,14 @@ def main(cfg: DictConfig):
     train_transform, test_transform = configure_transforms(cfg)
 
     dm = CatsDogsDataModule(
-        train_data_path=expected_workdir / cfg.train.dataset.train.path,
-        val_data_path=expected_workdir / cfg.train.dataset.val.path,
-        test_data_path=expected_workdir / cfg.train.dataset.test.path,
+        train_data_path=expected_workdir / cfg.dataset.train.path,
+        val_data_path=expected_workdir / cfg.dataset.val.path,
+        test_data_path=expected_workdir / cfg.dataset.test.path,
         train_transform=train_transform,
         test_transform=test_transform,
-        train_batch_size=cfg.train.dataset.train.batch_size,
-        val_batch_size=cfg.train.dataset.val.batch_size,
-        test_batch_size=cfg.train.dataset.test.batch_size,
+        train_batch_size=cfg.dataset.train.batch_size,
+        val_batch_size=cfg.dataset.val.batch_size,
+        test_batch_size=cfg.dataset.test.batch_size,
         num_workers=cfg.num_workers,
     )
 
@@ -77,7 +77,7 @@ def main(cfg: DictConfig):
 
     logger = pl.loggers.MLFlowLogger(
         experiment_name="cats_dogs",
-        run_name=cfg.train.experiment_name,
+        run_name=cfg.experiment_name,
         tracking_uri=cfg.mlflow_server,
     )
 
@@ -85,27 +85,25 @@ def main(cfg: DictConfig):
         cfg.commit_hash = get_git_revision_hash()
     logger.log_hyperparams(cfg)
 
-    every_n_train_steps = cfg.train.callbacks.model_ckpt.every_n_train_steps
+    every_n_train_steps = cfg.callbacks.model_ckpt.every_n_train_steps
     callbacks = [
         pl.callbacks.LearningRateMonitor(logging_interval="step"),
-        pl.callbacks.RichModelSummary(
-            max_depth=cfg.train.callbacks.model_summary.max_depth
-        ),
+        pl.callbacks.RichModelSummary(max_depth=cfg.callbacks.model_summary.max_depth),
         pl.callbacks.ModelCheckpoint(
-            dirpath=cfg.train.callbacks.model_ckpt.ckpt_path,
-            filename=cfg.train.experiment_name,
+            dirpath=cfg.callbacks.model_ckpt.ckpt_path,
+            filename=cfg.experiment_name,
             monitor="val_loss",
-            save_top_k=cfg.train.callbacks.model_ckpt.save_top_k,
+            save_top_k=cfg.callbacks.model_ckpt.save_top_k,
             every_n_train_steps=every_n_train_steps,
         ),
     ]
 
     trainer = pl.Trainer(
-        accelerator=cfg.train.accelerator,
-        devices=cfg.train.devices,
+        accelerator=cfg.accelerator,
+        devices=cfg.devices,
         precision=cfg.precision,
-        max_steps=cfg.train.steps,
-        log_every_n_steps=cfg.train.loggers.log_every_n_steps,
+        max_steps=cfg.steps,
+        log_every_n_steps=cfg.loggers.log_every_n_steps,
         enable_checkpointing=True,
         enable_model_summary=True,
         enable_progress_bar=True,

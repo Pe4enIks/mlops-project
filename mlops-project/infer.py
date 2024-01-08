@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @hydra.main(
     config_path=str(Path(__file__).parent / "configs"),
-    config_name="main",
+    config_name="infer",
     version_base="1.2",
 )
 def main(cfg: DictConfig):
@@ -33,10 +33,10 @@ def main(cfg: DictConfig):
     )
 
     ort_session = onnxruntime.InferenceSession(
-        expected_workdir / cfg.infer.ckpt, providers=["CPUExecutionProvider"]
+        expected_workdir / cfg.ckpt, providers=["CPUExecutionProvider"]
     )
 
-    img = Image.open(str(expected_workdir / cfg.infer.img)).convert("RGB")
+    img = Image.open(str(expected_workdir / cfg.img)).convert("RGB")
     img = transform(img)
     img = img.unsqueeze(0).numpy().astype(np.float32)
 
@@ -48,9 +48,7 @@ def main(cfg: DictConfig):
     pred_class = class_mapping[np.argmax(outputs[0], axis=1)[0]]
 
     logger.info(
-        f"ckpt: {cfg.infer.ckpt} "
-        f"img: {cfg.infer.img} "
-        f"predicted class: {pred_class}"
+        f"ckpt: {cfg.ckpt} " f"img: {cfg.img} " f"predicted class: {pred_class}"
     )
 
 
